@@ -1,0 +1,12 @@
+{
+  "name": "rayz-shared",
+  "version": "1.0.0",
+  "description": "Shared library for RayZ Target and Weapon devices",
+  "keywords": "esp32, common, shared",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/David-ssnd/RayZ.git"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}
