@@ -2,36 +2,37 @@
 #define HASH_H
 
 #include <stdint.h>
+#include "protocol_config.h"
 
 #ifdef ARDUINO
 #include <Arduino.h>
 #endif
 
-#define RAYZ_PROTOCOL_VERSION "1.0.0"
-
-#define MAX_MESSAGE_SIZE 256
-#define COMMUNICATION_TIMEOUT 5000
-
-#define PHOTODIODE_BUFFER_SIZE 16
-#define PHOTODIODE_DATA_BITS 12
-#define PHOTODIODE_HASH_BITS 4
-
-inline uint8_t calculateHash4bit(uint16_t data) {
-    data &= 0x0FFF;
-    
-    uint8_t nibble0 = data & 0x0F;
-    uint8_t nibble1 = (data >> 4) & 0x0F;
-    uint8_t nibble2 = (data >> 8) & 0x0F;
-    
-    uint8_t hash = (nibble0 ^ nibble1 ^ nibble2 ^ 0x09 + 1) & 0x0F;
-    
+/**
+ * @brief Calculate 8-bit hash for message integrity
+ * 
+ * @param data The 8-bit data value to hash
+ * @return uint8_t The calculated 8-bit hash value
+ */
+inline uint8_t calculateHash8bit(uint16_t data) {
+    uint8_t hash = (((data & 0xFF) ^ HASH_XOR_SEED) + HASH_OFFSET) & 0xFF;
     return hash;
 }
 
-inline bool validateMessage16bit(uint16_t message, uint16_t* outData) {
-    uint16_t data = (message >> 4) & 0x0FFF;
-    uint8_t receivedHash = message & 0x0F;
-    uint8_t expectedHash = calculateHash4bit(data);
+/**
+ * @brief Validate a 16-bit message by checking its hash
+ * 
+ * Message format: [8-bit data][8-bit hash]
+ * 
+ * @param message The 16-bit message to validate
+ * @param outData Optional pointer to store the extracted data if valid
+ * @return true if the hash is valid, false otherwise
+ */
+inline bool validateMessage16bit(uint16_t message, uint16_t* outData = nullptr) {
+    uint16_t data = (message >> MESSAGE_HASH_BITS) & 0xFF;
+    uint8_t receivedHash = message & 0xFF;
+    
+    uint8_t expectedHash = calculateHash8bit(data);
     
     if (receivedHash == expectedHash) {
         if (outData != nullptr) {
@@ -43,10 +44,20 @@ inline bool validateMessage16bit(uint16_t message, uint16_t* outData) {
     return false;
 }
 
+/**
+ * @brief Create a 16-bit message with data and hash
+ * 
+ * Message format: [8-bit data][8-bit hash]
+ * 
+ * @param data The data value to encode (only lower 8 bits used)
+ * @return uint16_t The complete 16-bit message with hash
+ */
 inline uint16_t createMessage16bit(uint16_t data) {
-    data &= 0x0FFF;
-    uint8_t hash = calculateHash4bit(data);
-    uint16_t message = (data << 4) | (hash & 0x0F);
+    data &= 0xFF;
+    
+    uint8_t hash = calculateHash8bit(data);
+    
+    uint16_t message = (data << MESSAGE_HASH_BITS) | (hash & 0xFF);
     
     return message;
 }
