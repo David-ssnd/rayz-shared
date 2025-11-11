@@ -4,10 +4,6 @@
 #include "protocol_config.h"
 #include <stdint.h>
 
-#ifdef ARDUINO
-#include <Arduino.h>
-#endif
-
 /**
  * @brief Calculate 8-bit hash for message integrity
  *

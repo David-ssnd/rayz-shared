@@ -7,6 +7,6 @@
     "type": "git",
     "url": "https://github.com/David-ssnd/RayZ.git"
   },
-  "frameworks": "arduino",
+  "frameworks": "espidf",
   "platforms": "espressif32"
 }

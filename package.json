@@ -1,0 +1,15 @@
+{
+  "name": "rayz-shared",
+  "version": "1.0.0",
+  "description": "Shared component for RayZ ESP32 projects",
+  "keywords": [
+    "esp32",
+    "shared"
+  ],
+  "frameworks": [
+    "espidf"
+  ],
+  "platforms": [
+    "espressif32"
+  ]
+}
