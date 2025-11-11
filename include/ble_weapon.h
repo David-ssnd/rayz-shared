@@ -2,33 +2,38 @@
 #define BLE_WEAPON_H
 
 #include <Arduino.h>
+#include <BLE2902.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
-#include <BLE2902.h>
 
-class BLEWeapon {
-private:
+class BLEWeapon
+{
+  private:
     BLEServer* pServer;
     BLECharacteristic* pMessageCharacteristic;
     bool deviceConnected;
     bool oldDeviceConnected;
-    
-    class ServerCallbacks : public BLEServerCallbacks {
+
+    class ServerCallbacks : public BLEServerCallbacks
+    {
         BLEWeapon* parent;
-    public:
+
+      public:
         ServerCallbacks(BLEWeapon* p) : parent(p) {}
-        
-        void onConnect(BLEServer* pServer) {
+
+        void onConnect(BLEServer* pServer)
+        {
             parent->deviceConnected = true;
         }
-        
-        void onDisconnect(BLEServer* pServer) {
+
+        void onDisconnect(BLEServer* pServer)
+        {
             parent->deviceConnected = false;
         }
     };
-    
-public:
+
+  public:
     BLEWeapon();
     void begin();
     void sendMessage(uint16_t message);

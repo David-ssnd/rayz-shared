@@ -2,15 +2,15 @@
 #define BLE_TARGET_H
 
 #include "ble_config.h"
-
 #include <Arduino.h>
-#include <BLEDevice.h>
 #include <BLEClient.h>
-#include <BLEUtils.h>
+#include <BLEDevice.h>
 #include <BLEScan.h>
+#include <BLEUtils.h>
 
-class BLETarget {
-private:
+class BLETarget
+{
+  private:
     BLEClient* pClient;
     BLERemoteCharacteristic* pRemoteCharacteristic;
     bool connected;
@@ -18,39 +18,47 @@ private:
     BLEAdvertisedDevice* targetDevice;
     uint16_t lastReceivedMessage;
     bool hasNewMessage;
-    
-    class ClientCallbacks : public BLEClientCallbacks {
+
+    class ClientCallbacks : public BLEClientCallbacks
+    {
         BLETarget* parent;
-    public:
+
+      public:
         ClientCallbacks(BLETarget* p) : parent(p) {}
-        
-        void onConnect(BLEClient* pClient) {
+
+        void onConnect(BLEClient* pClient)
+        {
             parent->connected = true;
         }
-        
-        void onDisconnect(BLEClient* pClient) {
+
+        void onDisconnect(BLEClient* pClient)
+        {
             parent->connected = false;
         }
     };
-    
-    class AdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
+
+    class AdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
+    {
         BLETarget* parent;
-    public:
+
+      public:
         AdvertisedDeviceCallbacks(BLETarget* p) : parent(p) {}
-        
-        void onResult(BLEAdvertisedDevice advertisedDevice) {
-            if (advertisedDevice.haveName() && 
-                advertisedDevice.getName() == BLE_WEAPON_NAME) {
+
+        void onResult(BLEAdvertisedDevice advertisedDevice)
+        {
+            if (advertisedDevice.haveName() && advertisedDevice.getName() == BLE_WEAPON_NAME)
+            {
                 BLEDevice::getScan()->stop();
                 parent->targetDevice = new BLEAdvertisedDevice(advertisedDevice);
                 parent->doConnect = true;
             }
         }
     };
-    
-    static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify);
-    
-public:
+
+    static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData,
+                               size_t length, bool isNotify);
+
+  public:
     BLETarget();
     void begin();
     void scan();

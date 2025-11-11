@@ -6,6 +6,11 @@
 .vscode/launch.json
 .vscode/ipch
 
+# Clangd
+.cache/
+.clangd
+compile_commands.json
+
 # Build artifacts
 *.o
 *.a
