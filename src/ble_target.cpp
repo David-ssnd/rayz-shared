@@ -1,7 +1,7 @@
 #include "ble_target.h"
 #include "ble_config.h"
+#include "protocol_config.h"
 
-// Static instance pointer for the callback
 static BLETarget* bleTargetInstance = nullptr;
 
 BLETarget::BLETarget() : pClient(nullptr), pRemoteCharacteristic(nullptr),
@@ -22,8 +22,6 @@ void BLETarget::notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic
 void BLETarget::begin() {
     Serial.println("Initializing BLE Target...");
     BLEDevice::init(BLE_TARGET_NAME);
-    
-    // Start scanning
     scan();
 }
 
@@ -49,14 +47,12 @@ bool BLETarget::connectToServer() {
     pClient = BLEDevice::createClient();
     pClient->setClientCallbacks(new ClientCallbacks(this));
     
-    // Connect to the remote BLE Server
     if (!pClient->connect(targetDevice)) {
         Serial.println("Failed to connect to server");
         return false;
     }
     Serial.println("Connected to server");
     
-    // Obtain a reference to the service
     BLERemoteService* pRemoteService = pClient->getService(BLE_SERVICE_UUID);
     if (pRemoteService == nullptr) {
         Serial.print("Failed to find service UUID: ");
@@ -66,7 +62,6 @@ bool BLETarget::connectToServer() {
     }
     Serial.println("Found service");
     
-    // Obtain a reference to the characteristic
     pRemoteCharacteristic = pRemoteService->getCharacteristic(BLE_MESSAGE_CHAR_UUID);
     if (pRemoteCharacteristic == nullptr) {
         Serial.print("Failed to find characteristic UUID: ");
@@ -76,7 +71,6 @@ bool BLETarget::connectToServer() {
     }
     Serial.println("Found characteristic");
     
-    // Register for notifications
     if (pRemoteCharacteristic->canNotify()) {
         pRemoteCharacteristic->registerForNotify(notifyCallback);
         Serial.println("Registered for notifications");
@@ -88,19 +82,17 @@ bool BLETarget::connectToServer() {
 }
 
 void BLETarget::update() {
-    // Try to connect if flagged
     if (doConnect) {
         if (connectToServer()) {
             Serial.println("Successfully connected to weapon");
         } else {
             Serial.println("Failed to connect, will retry scanning...");
-            delay(1000);
+            delay(BLE_RETRY_DELAY_MS);
             scan();
         }
         doConnect = false;
     }
     
-    // Handle disconnection
     if (!connected && pClient) {
         Serial.println("Lost connection. Scanning again...");
         scan();
