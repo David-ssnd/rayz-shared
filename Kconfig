@@ -1,0 +1,19 @@
+menu "RayZ Shared Component"
+
+config RAYZ_BLE_QUEUE_LENGTH
+    int "BLE message queue length"
+    range 1 32
+    default 10
+    help
+        Controls the depth of the BLE message queue used by the Target device
+        when collecting weapon messages over BLE.
+
+config RAYZ_BLE_RECONNECT_DELAY_MS
+    int "BLE reconnect delay (ms)"
+    range 100 10000
+    default 500
+    help
+        Delay applied after a BLE disconnect before the Weapon role restarts
+        advertising. Increase for calmer logs, decrease for faster reconnects.
+
+endmenu
