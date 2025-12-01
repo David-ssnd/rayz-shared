@@ -29,8 +29,8 @@ bool parse_uuid128(const char* uuid_str, ble_uuid128_t& uuid_out)
 } // namespace
 
 BLETarget::BLETarget()
-    : conn_handle(BLE_HS_CONN_HANDLE_NONE), message_char_handle(0), connected(false),
-      lastReceivedMessage(0), hasNewMessage(false)
+    : conn_handle(BLE_HS_CONN_HANDLE_NONE), message_char_handle(0), connected(false), lastReceivedMessage(0),
+      hasNewMessage(false)
 {
     instance = this;
     event_group = xEventGroupCreate();
@@ -148,8 +148,7 @@ int BLETarget::gap_event_handler(struct ble_gap_event* event, void* arg)
                 instance->connected = true;
 
                 // Start service discovery
-                int rc = ble_gattc_disc_all_svcs(event->connect.conn_handle,
-                                                 BLETarget::on_service_discovery, instance);
+                int rc = ble_gattc_disc_all_svcs(event->connect.conn_handle, BLETarget::on_service_discovery, instance);
                 if (rc != 0)
                 {
                     ESP_LOGE(TAG, "Service discovery start failed (rc=%d)", rc);
@@ -181,15 +180,18 @@ int BLETarget::gap_event_handler(struct ble_gap_event* event, void* arg)
         }
         case BLE_GAP_EVENT_NOTIFY_RX:
         {
-            if (event->notify_rx.attr_handle == instance->message_char_handle &&
-                event->notify_rx.om && OS_MBUF_PKTLEN(event->notify_rx.om) == 2)
+            if (event->notify_rx.attr_handle == instance->message_char_handle && event->notify_rx.om &&
+                OS_MBUF_PKTLEN(event->notify_rx.om) == 2)
             {
                 uint8_t data[2];
                 os_mbuf_copydata(event->notify_rx.om, 0, sizeof(data), data);
                 uint16_t message = (static_cast<uint16_t>(data[0]) << 8) | data[1];
                 instance->lastReceivedMessage = message;
                 instance->hasNewMessage = true;
-                xQueueSend(instance->message_queue, &message, 0);
+                if (xQueueSend(instance->message_queue, &message, 0) != pdTRUE)
+                {
+                    ESP_LOGW(TAG, "BLE queue full, dropping message");
+                }
             }
             break;
         }
@@ -260,8 +262,7 @@ int BLETarget::enable_notifications(uint16_t conn_handle) const
 
     uint16_t ccc_handle = message_char_handle + 1;
     const uint8_t notify_enable[2] = {0x01, 0x00};
-    return ble_gattc_write_flat(conn_handle, ccc_handle, notify_enable, sizeof(notify_enable),
-                                nullptr, nullptr);
+    return ble_gattc_write_flat(conn_handle, ccc_handle, notify_enable, sizeof(notify_enable), nullptr, nullptr);
 }
 
 void BLETarget::update()
@@ -276,11 +277,23 @@ bool BLETarget::isConnected()
 
 bool BLETarget::hasMessage()
 {
-    return hasNewMessage;
+    // Prefer queue to avoid losing messages; fall back to flag if needed
+    return (uxQueueMessagesWaiting(message_queue) > 0) || hasNewMessage;
 }
 
 uint16_t BLETarget::getMessage()
 {
     hasNewMessage = false;
     return lastReceivedMessage;
+}
+
+bool BLETarget::fetchMessage(uint16_t* message, TickType_t ticksToWait)
+{
+    if (xQueueReceive(message_queue, message, ticksToWait) == pdTRUE)
+    {
+        lastReceivedMessage = *message;
+        hasNewMessage = false;
+        return true;
+    }
+    return false;
 }

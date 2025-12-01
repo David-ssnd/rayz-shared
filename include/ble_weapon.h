@@ -12,6 +12,7 @@
 #include <nimble/nimble_port_freertos.h>
 #include <nvs_flash.h>
 
+
 class BLEWeapon
 {
   private:
@@ -25,8 +26,8 @@ class BLEWeapon
     static BLEWeapon* instance;
 
     static int gap_event_handler(struct ble_gap_event* event, void* arg);
-    static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
-                                   struct ble_gatt_access_ctxt* ctxt, void* arg);
+    static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt* ctxt,
+                                   void* arg);
 
     void start_advertising();
 

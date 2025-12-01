@@ -2,6 +2,8 @@
 #include "ble_config.h"
 #include "protocol_config.h"
 #include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <services/gap/ble_svc_gap.h>
 #include <services/gatt/ble_svc_gatt.h>
 #include <string.h>
@@ -29,8 +31,7 @@ bool parse_uuid128(const char* uuid_str, ble_uuid128_t& uuid_out)
 } // namespace
 
 BLEWeapon::BLEWeapon()
-    : conn_handle(BLE_HS_CONN_HANDLE_NONE), deviceConnected(false), oldDeviceConnected(false),
-      message_char_handle(0)
+    : conn_handle(BLE_HS_CONN_HANDLE_NONE), deviceConnected(false), oldDeviceConnected(false), message_char_handle(0)
 {
     instance = this;
     event_group = xEventGroupCreate();
@@ -127,8 +128,7 @@ void BLEWeapon::start_advertising()
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
     ESP_LOGI(TAG, "Starting advertising...");
-    ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, nullptr, BLE_HS_FOREVER, &adv_params, gap_event_handler,
-                      nullptr);
+    ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, nullptr, BLE_HS_FOREVER, &adv_params, gap_event_handler, nullptr);
 }
 
 int BLEWeapon::gap_event_handler(struct ble_gap_event* event, void* arg)
@@ -139,8 +139,8 @@ int BLEWeapon::gap_event_handler(struct ble_gap_event* event, void* arg)
     switch (event->type)
     {
         case BLE_GAP_EVENT_CONNECT:
-            ESP_LOGI(TAG, "Connection %s; status=%d",
-                     event->connect.status == 0 ? "established" : "failed", event->connect.status);
+            ESP_LOGI(TAG, "Connection %s; status=%d", event->connect.status == 0 ? "established" : "failed",
+                     event->connect.status);
 
             if (event->connect.status == 0)
             {
@@ -173,8 +173,8 @@ int BLEWeapon::gap_event_handler(struct ble_gap_event* event, void* arg)
     return 0;
 }
 
-int BLEWeapon::gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
-                                   struct ble_gatt_access_ctxt* ctxt, void* arg)
+int BLEWeapon::gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt* ctxt,
+                                   void* arg)
 {
     if (!instance)
         return BLE_ATT_ERR_UNLIKELY;
@@ -197,8 +197,7 @@ void BLEWeapon::sendMessage(uint16_t message)
         gatt_svr_chr_message[0] = (message >> 8) & 0xFF;
         gatt_svr_chr_message[1] = message & 0xFF;
 
-        struct os_mbuf* om =
-            ble_hs_mbuf_from_flat(gatt_svr_chr_message, sizeof(gatt_svr_chr_message));
+        struct os_mbuf* om = ble_hs_mbuf_from_flat(gatt_svr_chr_message, sizeof(gatt_svr_chr_message));
         if (om)
         {
             int rc = ble_gatts_notify_custom(conn_handle, message_char_handle, om);

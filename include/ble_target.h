@@ -25,6 +25,7 @@ class BLETarget
     bool isConnected();
     bool hasMessage();
     uint16_t getMessage();
+    bool fetchMessage(uint16_t* message, TickType_t ticksToWait = 0);
 
   private:
     uint16_t conn_handle;

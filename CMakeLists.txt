@@ -3,9 +3,17 @@ idf_component_register(
         "src/ble_target.cpp"
         "src/ble_weapon.cpp"
         "src/utils.cpp"
+        "src/nvs_store.cpp"
+        "src/wifi_manager.cpp"
+        "src/http_api.cpp"
+        "src/ws_server.cpp"
     INCLUDE_DIRS 
         "include"
     REQUIRES
         nvs_flash
         bt
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_http_server
 )

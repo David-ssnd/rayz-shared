@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <string>
 
-
 /**
  * @brief Convert a value to binary string representation with spaces every 4 bits
  * @param value The value to convert
