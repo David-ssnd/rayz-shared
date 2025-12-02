@@ -18,11 +18,11 @@ extern "C"
 {
 #endif
 
-#include <freertos/event_groups.h>
 #include <freertos/FreeRTOS.h>
+
+#include <freertos/event_groups.h>
 #include <stdbool.h>
 #include <stdint.h>
-
 
 // Event group bits
 #define WIFI_EVENT_PROVISIONED_BIT (1 << 0)

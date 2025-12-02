@@ -1,8 +1,11 @@
-#include "wifi_manager.h"
+// FreeRTOS includes must precede dependent headers for some APIs
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #include "http_api.h"
 #include "nvs_store.h"
+#include "wifi_manager.h"
 #include "ws_server.h"
-
 
 #include <esp_event.h>
 #include <esp_http_server.h>
@@ -11,7 +14,6 @@
 #include <esp_wifi.h>
 #include <nvs_flash.h>
 #include <string.h>
-
 
 static const char* TAG = "WiFiMgr";
 static EventGroupHandle_t s_event_group = NULL;
@@ -124,11 +126,19 @@ static esp_err_t config_post_handler(httpd_req_t* req)
     if (role[0])
         nvs_store_write_str(NVS_NS_WIFI, NVS_KEY_ROLE, role);
 
-    httpd_resp_sendstr(req, "Stored. Reconnecting...");
+    // Send response message
+    char response[256];
+    snprintf(response, sizeof(response),
+             "<html><body><h2>RayZ Provisioning</h2>"
+             "<p>Information stored. Trying to connect to wifi: <b>%s</b></p>"
+             "<p>Device will now switch to station mode...</p></body></html>",
+             ssid);
+    httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+
     ESP_LOGI(TAG, "Provisioned SSID=%s name=%s role=%s", ssid, name, role);
 
-    // Small delay then connect
-    vTaskDelay(pdMS_TO_TICKS(500));
+    // Small delay then stop AP and connect
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
     // Stop AP server and switch
     if (s_httpd)
@@ -136,6 +146,11 @@ static esp_err_t config_post_handler(httpd_req_t* req)
         httpd_stop(s_httpd);
         s_httpd = NULL;
     }
+
+    // Stop AP WiFi before starting STA
+    esp_wifi_stop();
+    esp_wifi_deinit();
+
     start_sta(ssid, pass);
     return ESP_OK;
 }

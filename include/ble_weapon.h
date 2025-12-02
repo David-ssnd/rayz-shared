@@ -2,8 +2,9 @@
 #define BLE_WEAPON_H
 
 #include <cstdint>
-#include <freertos/event_groups.h>
 #include <freertos/FreeRTOS.h>
+
+#include <freertos/event_groups.h>
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
 #include <host/ble_hs.h>
@@ -11,7 +12,6 @@
 #include <nimble/nimble_port.h>
 #include <nimble/nimble_port_freertos.h>
 #include <nvs_flash.h>
-
 
 class BLEWeapon
 {

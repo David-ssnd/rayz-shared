@@ -1,8 +1,10 @@
-#include "ble_target.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #include "ble_config.h"
+#include "ble_target.h"
 #include "protocol_config.h"
 #include <esp_log.h>
-#include <freertos/task.h>
 #include <os/os_mbuf.h>
 #include <services/gap/ble_svc_gap.h>
 #include <services/gatt/ble_svc_gatt.h>

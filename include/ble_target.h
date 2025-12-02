@@ -1,10 +1,11 @@
 #ifndef BLE_TARGET_H
 #define BLE_TARGET_H
 
+#include <freertos/FreeRTOS.h>
+
 #include "ble_config.h"
 #include <cstdint>
 #include <freertos/event_groups.h>
-#include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
@@ -14,7 +15,6 @@
 #include <nimble/nimble_port_freertos.h>
 #include <nvs_flash.h>
 #include <stdint.h>
-
 
 class BLETarget
 {
