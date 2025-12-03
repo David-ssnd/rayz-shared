@@ -1,14 +1,13 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-
-#include "ble_config.h"
-#include "ble_weapon.h"
-#include "protocol_config.h"
 #include <esp_log.h>
 #include <services/gap/ble_svc_gap.h>
 #include <services/gatt/ble_svc_gatt.h>
 #include <string.h>
 
+#include "ble_config.h"
+#include "ble_weapon.h"
+#include "protocol_config.h"
 
 static const char* TAG = "BLEWeapon";
 

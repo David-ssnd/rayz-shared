@@ -1,10 +1,10 @@
 #ifndef BLE_WEAPON_H
 #define BLE_WEAPON_H
 
-#include <cstdint>
 #include <freertos/FreeRTOS.h>
 
 #include <freertos/event_groups.h>
+#include <cstdint>
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
 #include <host/ble_hs.h>

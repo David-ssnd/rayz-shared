@@ -5,6 +5,9 @@ idf_component_register(
         "src/utils.cpp"
         "src/nvs_store.cpp"
         "src/wifi_manager.cpp"
+        "src/wifi_state.cpp"
+        "src/wifi_core.cpp"
+        "src/wifi_http.cpp"
         "src/http_api.cpp"
         "src/ws_server.cpp"
     INCLUDE_DIRS 

@@ -3,7 +3,6 @@
 #include <nvs.h>
 #include <nvs_flash.h>
 
-
 static const char* TAG = "NVSStore";
 
 bool nvs_store_read_str(const char* ns, const char* key, char* out, size_t max_len)

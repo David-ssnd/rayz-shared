@@ -1,8 +1,8 @@
 #ifndef HASH_H
 #define HASH_H
 
-#include "protocol_config.h"
 #include <stdint.h>
+#include "protocol_config.h"
 
 /**
  * @brief Calculate 8-bit hash for message integrity

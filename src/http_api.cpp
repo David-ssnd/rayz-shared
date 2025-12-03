@@ -1,7 +1,7 @@
 #include "http_api.h"
-#include "wifi_manager.h"
 #include <esp_log.h>
 #include <string.h>
+#include "wifi_manager.h"
 
 static const char* TAG = "HttpApi";
 

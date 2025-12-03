@@ -2,7 +2,6 @@
 #include <esp_http_server.h>
 #include <stdint.h>
 
-
 // Initialize REST endpoints after WiFi connected
 httpd_handle_t http_api_start(httpd_handle_t server);
 

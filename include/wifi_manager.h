@@ -19,7 +19,6 @@ extern "C"
 #endif
 
 #include <freertos/FreeRTOS.h>
-
 #include <freertos/event_groups.h>
 #include <stdbool.h>
 #include <stdint.h>
