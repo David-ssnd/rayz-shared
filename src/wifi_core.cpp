@@ -11,12 +11,25 @@
 
 static const char* TAG = "WiFiCore";
 
+static void on_wifi_disconnect(void* arg, esp_event_base_t base, int32_t id, void* data)
+{
+    ESP_LOGW(TAG, "WiFi disconnected, retrying...");
+    if (g_wifi_events)
+    {
+        xEventGroupClearBits(g_wifi_events, WIFI_EVENT_STA_CONNECTED_BIT);
+    }
+    esp_wifi_connect();
+}
+
 static void on_got_ip(void* arg, esp_event_base_t base, int32_t id, void* data)
 {
     ip_event_got_ip_t* event = (ip_event_got_ip_t*)data;
     snprintf(g_wifi_ip, sizeof(g_wifi_ip), IPSTR, IP2STR(&event->ip_info.ip));
     ESP_LOGI(TAG, "Got IP: %s", g_wifi_ip);
-    xEventGroupSetBits(g_wifi_events, WIFI_EVENT_STA_CONNECTED_BIT);
+    if (g_wifi_events)
+    {
+        xEventGroupSetBits(g_wifi_events, WIFI_EVENT_STA_CONNECTED_BIT);
+    }
     wifi_start_http_server(false);
     http_api_start(g_httpd);
     ws_server_register(g_httpd);
@@ -51,7 +64,11 @@ void wifi_start_sta(const char* ssid, const char* pass)
     esp_netif_create_default_wifi_sta();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_wifi_init(&cfg);
+
+    // Register event handlers for connection management
+    esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, on_wifi_disconnect, NULL, NULL);
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_got_ip, NULL, NULL);
+
     esp_wifi_set_mode(WIFI_MODE_STA);
 
     wifi_config_t sta_config = {};
@@ -60,7 +77,10 @@ void wifi_start_sta(const char* ssid, const char* pass)
     sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     esp_wifi_set_config(WIFI_IF_STA, &sta_config);
     esp_wifi_start();
+
+    // Non-blocking connect - will retry asynchronously via event handler
     esp_wifi_connect();
+    ESP_LOGI(TAG, "WiFi connect initiated (non-blocking)");
 }
 
 void wifi_evaluate_boot_mode()
@@ -68,14 +88,20 @@ void wifi_evaluate_boot_mode()
     char ssid[WIFI_MAX_SSID_LEN] = {0};
     char pass[WIFI_MAX_PASS_LEN] = {0};
     bool have = nvs_store_read_str(NVS_NS_WIFI, NVS_KEY_SSID, ssid, sizeof(ssid));
-    if (have)
+    
+    if (have && strlen(ssid) > 0)
     {
+        ESP_LOGI(TAG, "Found saved WiFi credentials, connecting to: %s", ssid);
         nvs_store_read_str(NVS_NS_WIFI, NVS_KEY_PASS, pass, sizeof(pass));
         wifi_start_sta(ssid, pass);
-        xEventGroupSetBits(g_wifi_events, WIFI_EVENT_PROVISIONED_BIT);
+        if (g_wifi_events)
+        {
+            xEventGroupSetBits(g_wifi_events, WIFI_EVENT_PROVISIONED_BIT);
+        }
     }
     else
     {
+        ESP_LOGI(TAG, "No saved WiFi credentials found, starting AP mode");
         wifi_start_ap();
     }
 }

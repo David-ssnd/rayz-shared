@@ -20,6 +20,10 @@ EventGroupHandle_t wifi_manager_event_group()
 
 bool wifi_manager_is_connected()
 {
+    if (!g_wifi_events)
+    {
+        return false;
+    }
     EventBits_t bits = xEventGroupGetBits(g_wifi_events);
     return (bits & WIFI_EVENT_STA_CONNECTED_BIT) != 0;
 }
