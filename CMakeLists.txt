@@ -10,6 +10,8 @@ idf_component_register(
         "src/wifi_http.cpp"
         "src/http_api.cpp"
         "src/ws_server.cpp"
+        "src/game_state.cpp"
+        "src/ws_client.cpp"
     INCLUDE_DIRS 
         "include"
     REQUIRES
@@ -19,4 +21,5 @@ idf_component_register(
         esp_netif
         esp_event
         esp_http_server
+        esp_websocket_client
 )
