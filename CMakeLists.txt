@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS 
-        "src/ble_target.cpp"
-        "src/ble_weapon.cpp"
+        # "src/ble_target.cpp"
+        # "src/ble_weapon.cpp"
         "src/utils.cpp"
         "src/nvs_store.cpp"
         "src/wifi_manager.cpp"
@@ -11,15 +11,15 @@ idf_component_register(
         "src/http_api.cpp"
         "src/ws_server.cpp"
         "src/game_state.cpp"
-        "src/ws_client.cpp"
+        "src/espnow_comm.cpp"
     INCLUDE_DIRS 
         "include"
     REQUIRES
         nvs_flash
         bt
         esp_wifi
+        esp_coex
         esp_netif
         esp_event
         esp_http_server
-        esp_websocket_client
 )

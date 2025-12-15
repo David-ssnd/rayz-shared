@@ -3,22 +3,199 @@
 #include "wifi_internal.h"
 #include "ws_server.h"
 
+#include <esp_coexist.h>
+#include <esp_err.h>
 #include <esp_event.h>
 #include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_wifi.h>
 #include <string.h>
+#include <string>
 
 static const char* TAG = "WiFiCore";
 
+// Retry tracking
+static int s_retry_count = 0;
+static const int MAX_RETRY_COUNT = 15;
+static esp_netif_t* s_netif = NULL;
+
+static const char* reason_to_str(int reason)
+{
+    switch (reason)
+    {
+        case WIFI_REASON_AUTH_EXPIRE:
+            return "auth expire";
+        case WIFI_REASON_AUTH_FAIL:
+            return "auth fail";
+        case WIFI_REASON_ASSOC_LEAVE:
+            return "assoc leave";
+        case WIFI_REASON_BEACON_TIMEOUT:
+            return "beacon timeout";
+        case WIFI_REASON_NO_AP_FOUND:
+            return "no ap found";
+        case WIFI_REASON_ASSOC_FAIL:
+            return "assoc fail";
+        default:
+            return "other";
+    }
+}
+
+static uint8_t pick_least_crowded_channel(void)
+{
+    const uint8_t candidates[3] = {1, 6, 11};
+    int score[3] = {0, 0, 0};
+
+    wifi_scan_config_t scan_cfg = {0};
+    scan_cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+    scan_cfg.scan_time.active.min = 50;
+    scan_cfg.scan_time.active.max = 120;
+
+    esp_err_t err = esp_wifi_scan_start(&scan_cfg, true);
+    if (err != ESP_OK)
+        return 1;
+
+    uint16_t ap_count = 0;
+    err = esp_wifi_scan_get_ap_num(&ap_count);
+    if (err != ESP_OK || ap_count == 0)
+        return 1;
+
+    uint16_t max_records = ap_count > 32 ? 32 : ap_count;
+    wifi_ap_record_t records[32] = {0};
+
+    err = esp_wifi_scan_get_ap_records(&max_records, records);
+    if (err != ESP_OK)
+        return 1;
+
+    for (int i = 0; i < max_records; i++)
+    {
+        int ap_ch = records[i].primary; // 1..13
+        int rssi = records[i].rssi;     // negative dBm
+
+        // weight strong APs more than weak ones
+        // clamp to a sane range
+        int strength = 0;
+        if (rssi >= -50)
+            strength = 6;
+        else if (rssi >= -60)
+            strength = 4;
+        else if (rssi >= -70)
+            strength = 2;
+        else
+            strength = 1;
+
+        for (int c = 0; c < 3; c++)
+        {
+            int d = ap_ch - candidates[c];
+            if (d < 0)
+                d = -d;
+
+            int overlap = 0;
+            if (d == 0)
+                overlap = 3;
+            else if (d == 1)
+                overlap = 2;
+            else if (d == 2)
+                overlap = 1;
+
+            score[c] += overlap * strength;
+        }
+    }
+
+    int best = 0;
+    for (int c = 1; c < 3; c++)
+    {
+        if (score[c] < score[best])
+            best = c;
+    }
+
+    ESP_LOGI(TAG, "Channel score: ch1=%d ch6=%d ch11=%d -> pick %u", score[0], score[1], score[2], candidates[best]);
+
+    return candidates[best];
+}
+
+static bool find_best_ap(const char* ssid, wifi_ap_record_t* out_ap)
+{
+    if (!ssid || !out_ap)
+        return false;
+
+    wifi_scan_config_t scan_cfg = {};
+    scan_cfg.ssid = (uint8_t*)ssid;
+    scan_cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+    scan_cfg.scan_time.active.min = 100;
+    scan_cfg.scan_time.active.max = 300;
+
+    esp_wifi_scan_start(&scan_cfg, true);
+
+    uint16_t ap_count = 0;
+    esp_wifi_scan_get_ap_num(&ap_count);
+    if (ap_count == 0)
+        return false;
+
+    uint16_t max_records = ap_count > 16 ? 16 : ap_count;
+    wifi_ap_record_t records[16];
+    memset(records, 0, sizeof(records));
+    esp_wifi_scan_get_ap_records(&max_records, records);
+
+    int best_rssi = -128;
+    bool found = false;
+    for (int i = 0; i < max_records; i++)
+    {
+        if (strcmp((const char*)records[i].ssid, ssid) == 0 && records[i].rssi > best_rssi)
+        {
+            best_rssi = records[i].rssi;
+            memcpy(out_ap, &records[i], sizeof(wifi_ap_record_t));
+            found = true;
+        }
+    }
+    return found;
+}
+
 static void on_wifi_disconnect(void* arg, esp_event_base_t base, int32_t id, void* data)
 {
-    ESP_LOGW(TAG, "WiFi disconnected, retrying...");
     if (g_wifi_events)
     {
         xEventGroupClearBits(g_wifi_events, WIFI_EVENT_STA_CONNECTED_BIT);
     }
-    esp_wifi_connect();
+
+    if (data)
+    {
+        wifi_event_sta_disconnected_t* ev = (wifi_event_sta_disconnected_t*)data;
+        ESP_LOGW(TAG, "WiFi disconnected: reason=%d (%s)", ev->reason, reason_to_str(ev->reason));
+    }
+
+    s_retry_count++;
+    if (s_retry_count < MAX_RETRY_COUNT)
+    {
+        ESP_LOGW(TAG, "WiFi disconnected, retry %d/%d...", s_retry_count, MAX_RETRY_COUNT);
+        // Exponential backoff: 500ms, 1s, 2s, 5s, 5s, ...
+        int backoff_ms = 500;
+        if (s_retry_count == 1)
+            backoff_ms = 500;
+        else if (s_retry_count == 2)
+            backoff_ms = 1000;
+        else if (s_retry_count == 3)
+            backoff_ms = 2000;
+        else
+            backoff_ms = 5000;
+        vTaskDelay(pdMS_TO_TICKS(backoff_ms));
+        esp_wifi_set_ps(WIFI_PS_NONE); // Disable power saving before reconnect
+        esp_err_t cret = esp_wifi_connect();
+        if (cret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "esp_wifi_connect failed: %s", esp_err_to_name(cret));
+        }
+    }
+    else
+    {
+        ESP_LOGE(TAG, "WiFi connection failed after %d attempts. Check credentials.", MAX_RETRY_COUNT);
+        ESP_LOGW(TAG, "To retry: power cycle device. To reconfigure: erase flash or use factory reset.");
+        esp_wifi_stop();
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_wifi_start();
+        esp_wifi_set_ps(WIFI_PS_NONE);
+        esp_wifi_connect();
+        s_retry_count = 0;
+    }
 }
 
 static void on_got_ip(void* arg, esp_event_base_t base, int32_t id, void* data)
@@ -26,33 +203,93 @@ static void on_got_ip(void* arg, esp_event_base_t base, int32_t id, void* data)
     ip_event_got_ip_t* event = (ip_event_got_ip_t*)data;
     snprintf(g_wifi_ip, sizeof(g_wifi_ip), IPSTR, IP2STR(&event->ip_info.ip));
     ESP_LOGI(TAG, "Got IP: %s", g_wifi_ip);
+    s_retry_count = 0; // Reset retry count on successful connection
     if (g_wifi_events)
     {
         xEventGroupSetBits(g_wifi_events, WIFI_EVENT_STA_CONNECTED_BIT);
     }
+    esp_wifi_set_ps(WIFI_PS_NONE);
     wifi_start_http_server(false);
     http_api_start(g_httpd);
     ws_server_register(g_httpd);
+
+    // Lock Wi-Fi channel to AP channel for ESP-NOW coexistence
+    wifi_ap_record_t ap_info = {};
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK)
+    {
+        g_wifi_channel = ap_info.primary;
+        esp_err_t chret = esp_wifi_set_channel(g_wifi_channel, ap_info.second);
+        if (chret == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Locked channel to %u for ESP-NOW", g_wifi_channel);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Failed to lock channel: %s", esp_err_to_name(chret));
+        }
+    }
 }
 
 void wifi_start_ap()
 {
     ESP_LOGI(TAG, "Starting AP provisioning mode");
     g_wifi_boot_mode = WIFI_BOOT_PROVISIONING;
+    s_retry_count = 0;
 
-    esp_netif_create_default_wifi_ap();
+    // Clean up any existing netif
+    if (s_netif)
+    {
+        esp_netif_destroy(s_netif);
+        s_netif = NULL;
+    }
+
+    s_netif = esp_netif_create_default_wifi_ap();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&cfg);
-    esp_wifi_set_mode(WIFI_MODE_AP);
+    esp_err_t ret = esp_wifi_init(&cfg);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_init failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ret = esp_wifi_set_mode(WIFI_MODE_AP);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_set_mode(AP) failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    wifi_country_t country = {.cc = WIFI_COUNTRY_CODE, .schan = 1, .nchan = 13, .policy = WIFI_COUNTRY_POLICY_MANUAL};
+    esp_wifi_set_country(&country);
+    esp_wifi_set_max_tx_power(78); // ~19.5 dBm
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+
+    uint8_t ch = pick_least_crowded_channel();
 
     wifi_config_t ap_config = {};
     strcpy((char*)ap_config.ap.ssid, "RayZ-Setup");
     ap_config.ap.ssid_len = strlen("RayZ-Setup");
-    ap_config.ap.channel = 1;
+    ap_config.ap.channel = ch;
     ap_config.ap.authmode = WIFI_AUTH_OPEN;
     ap_config.ap.max_connection = 4;
-    esp_wifi_set_config(WIFI_IF_AP, &ap_config);
-    esp_wifi_start();
+    ret = esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_set_config(AP) failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ret = esp_wifi_start();
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_start(AP) failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ESP_LOGI(TAG, "AP mode started, SSID=RayZ-Setup");
+    g_wifi_channel = ap_config.ap.channel;
+    esp_wifi_set_ps(WIFI_PS_NONE);
 
     wifi_start_http_server(true);
 }
@@ -60,26 +297,91 @@ void wifi_start_ap()
 void wifi_start_sta(const char* ssid, const char* pass)
 {
     g_wifi_boot_mode = WIFI_BOOT_STA;
-    ESP_LOGI(TAG, "Starting STA mode SSID=%s", ssid);
-    esp_netif_create_default_wifi_sta();
+    s_retry_count = 0;
+    ESP_LOGI(TAG, "Starting STA mode SSID=%s, PASSCODE=%s", ssid, pass);
+
+    // Clean up any existing netif
+    if (s_netif)
+    {
+        esp_netif_destroy(s_netif);
+        s_netif = NULL;
+    }
+
+    s_netif = esp_netif_create_default_wifi_sta();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&cfg);
+    esp_err_t ret = esp_wifi_init(&cfg);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_init failed: %s", esp_err_to_name(ret));
+        return;
+    }
 
     // Register event handlers for connection management
-    esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, on_wifi_disconnect, NULL, NULL);
-    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_got_ip, NULL, NULL);
+    esp_err_t hret =
+        esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, on_wifi_disconnect, NULL, NULL);
+    if (hret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to register WIFI_EVENT handler: %s", esp_err_to_name(hret));
+    }
+    hret = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_got_ip, NULL, NULL);
+    if (hret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to register IP_EVENT handler: %s", esp_err_to_name(hret));
+    }
 
-    esp_wifi_set_mode(WIFI_MODE_STA);
+    ret = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_set_mode(STA) failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    esp_coex_preference_set(ESP_COEX_PREFER_WIFI);
 
     wifi_config_t sta_config = {};
     strncpy((char*)sta_config.sta.ssid, ssid, sizeof(sta_config.sta.ssid));
     strncpy((char*)sta_config.sta.password, pass, sizeof(sta_config.sta.password));
     sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-    esp_wifi_set_config(WIFI_IF_STA, &sta_config);
-    esp_wifi_start();
+    sta_config.sta.pmf_cfg.capable = true;
+    sta_config.sta.pmf_cfg.required = false;
+    sta_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    sta_config.sta.listen_interval = 3;
+    sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+
+    wifi_ap_record_t best = {};
+    if (find_best_ap(ssid, &best))
+    {
+        sta_config.sta.channel = best.primary;
+        memcpy(sta_config.sta.bssid, best.bssid, sizeof(best.bssid));
+        sta_config.sta.bssid_set = true;
+        ESP_LOGI(TAG, "Best AP found ch=%d rssi=%d bssid=%02X:%02X:%02X:%02X:%02X:%02X", best.primary, best.rssi,
+                 best.bssid[0], best.bssid[1], best.bssid[2], best.bssid[3], best.bssid[4], best.bssid[5]);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "AP '%s' not seen in scan; connecting blind", ssid);
+    }
+    ret = esp_wifi_set_config(WIFI_IF_STA, &sta_config);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_set_config(STA) failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ret = esp_wifi_start();
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_start(STA) failed: %s", esp_err_to_name(ret));
+        return;
+    }
 
     // Non-blocking connect - will retry asynchronously via event handler
-    esp_wifi_connect();
+    esp_wifi_set_ps(WIFI_PS_NONE); // Disable power saving before connect
+    ret = esp_wifi_connect();
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_wifi_connect failed: %s", esp_err_to_name(ret));
+    }
     ESP_LOGI(TAG, "WiFi connect initiated (non-blocking)");
 }
 
@@ -88,7 +390,7 @@ void wifi_evaluate_boot_mode()
     char ssid[WIFI_MAX_SSID_LEN] = {0};
     char pass[WIFI_MAX_PASS_LEN] = {0};
     bool have = nvs_store_read_str(NVS_NS_WIFI, NVS_KEY_SSID, ssid, sizeof(ssid));
-    
+
     if (have && strlen(ssid) > 0)
     {
         ESP_LOGI(TAG, "Found saved WiFi credentials, connecting to: %s", ssid);

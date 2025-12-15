@@ -1,6 +1,6 @@
 #include "utils.h"
 
-std::string toBinaryString(uint16_t value, int bits)
+std::string toBinaryString(uint32_t value, int bits)
 {
     std::string binary = "";
     for (int i = bits - 1; i >= 0; i--)

@@ -10,6 +10,6 @@
  * @param bits Number of bits to display
  * @return Binary string with spaces every 4 bits for readability
  */
-std::string toBinaryString(uint16_t value, int bits = 16);
+std::string toBinaryString(uint32_t value, int bits = 32);
 
 #endif

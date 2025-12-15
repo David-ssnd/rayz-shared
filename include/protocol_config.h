@@ -11,8 +11,8 @@
 #define COMMUNICATION_TIMEOUT_MS 5000
 
 // Message structure
-#define MESSAGE_TOTAL_BITS 16
-#define MESSAGE_DATA_BITS 8
+#define MESSAGE_TOTAL_BITS 32
+#define MESSAGE_DATA_BITS 32
 #define MESSAGE_HASH_BITS 8
 
 // Buffers

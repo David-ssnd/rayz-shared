@@ -4,6 +4,8 @@
 #include <esp_event.h>
 #include <esp_log.h>
 #include <esp_netif.h>
+#include <esp_wifi.h>
+#include <esp_timer.h>
 #include <nvs_flash.h>
 #include <string.h>
 
@@ -33,10 +35,59 @@ const char* wifi_manager_get_ip()
     return g_wifi_ip;
 }
 
+int wifi_manager_get_rssi()
+{
+    wifi_ap_record_t ap = {};
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
+    {
+        return ap.rssi;
+    }
+    return 0;
+}
+
+uint32_t wifi_manager_get_uptime_ms()
+{
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+uint8_t wifi_manager_get_channel()
+{
+    return g_wifi_channel;
+}
+
+const char* wifi_manager_get_peer_list()
+{
+    return g_peer_list;
+}
+
+bool wifi_manager_set_peer_list(const char* csv_peers)
+{
+    if (!csv_peers)
+        return false;
+
+    strncpy(g_peer_list, csv_peers, sizeof(g_peer_list) - 1);
+    g_peer_list[sizeof(g_peer_list) - 1] = '\0';
+    return nvs_store_write_str(NVS_NS_WIFI, NVS_KEY_PEERS, g_peer_list);
+}
+
+bool wifi_manager_load_peer_list(char* out, size_t max_len)
+{
+    if (!out || max_len == 0)
+        return false;
+    bool ok = nvs_store_read_str(NVS_NS_WIFI, NVS_KEY_PEERS, out, max_len);
+    if (ok)
+    {
+        strncpy(g_peer_list, out, sizeof(g_peer_list) - 1);
+        g_peer_list[sizeof(g_peer_list) - 1] = '\0';
+    }
+    return ok;
+}
+
 void wifi_manager_factory_reset()
 {
     ESP_LOGW(TAG, "Factory reset requested");
     nvs_store_erase_namespace(NVS_NS_WIFI);
+    g_peer_list[0] = '\0';
     esp_restart();
 }
 
@@ -58,6 +109,13 @@ void wifi_manager_init(const char* device_name, const char* role)
 
     esp_netif_init();
     esp_event_loop_create_default();
+
+    // Load cached peer list from NVS (used by ESP-NOW after Wi-Fi is ready)
+    nvs_store_read_str(NVS_NS_WIFI, NVS_KEY_PEERS, g_peer_list, sizeof(g_peer_list));
+    if (strlen(g_peer_list) > 0)
+    {
+        ESP_LOGI(TAG, "Loaded %u bytes of peer list from NVS", (unsigned)strlen(g_peer_list));
+    }
 
     wifi_evaluate_boot_mode();
 }

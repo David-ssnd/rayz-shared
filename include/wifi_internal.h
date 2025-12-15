@@ -15,6 +15,7 @@
 #define NVS_KEY_PASS "pass"
 #define NVS_KEY_NAME "name"
 #define NVS_KEY_ROLE "role"
+#define NVS_KEY_PEERS "peers"
 
 // Shared state
 extern EventGroupHandle_t g_wifi_events;
@@ -23,6 +24,12 @@ extern char g_wifi_ip[16];
 extern httpd_handle_t g_httpd;
 extern char g_device_name[32];
 extern char g_role[12];
+extern uint8_t g_wifi_channel;
+extern char g_peer_list[256];
+
+#ifndef WIFI_COUNTRY_CODE
+#define WIFI_COUNTRY_CODE "SK"
+#endif
 
 // Internal functions split across units
 void wifi_start_http_server(bool provisioning_mode);
