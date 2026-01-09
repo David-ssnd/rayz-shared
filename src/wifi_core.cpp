@@ -188,10 +188,27 @@ static void on_wifi_disconnect(void* arg, esp_event_base_t base, int32_t id, voi
     else
     {
         ESP_LOGE(TAG, "WiFi connection failed after %d attempts. Check credentials.", MAX_RETRY_COUNT);
-        ESP_LOGW(TAG, "To retry: power cycle device. To reconfigure: erase flash or use factory reset.");
+
+        // Try clearing BSSID lock if we were stuck on a specific AP
+        wifi_config_t conf = {};
+        if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK)
+        {
+            if (conf.sta.bssid_set)
+            {
+                ESP_LOGW(TAG, "Clearing BSSID lock to allow roaming for next attempt");
+                conf.sta.bssid_set = false;
+                memset(conf.sta.bssid, 0, 6);
+                esp_wifi_set_config(WIFI_IF_STA, &conf);
+            }
+        }
+
+        ESP_LOGW(TAG, "Restarting WiFi driver...");
         esp_wifi_stop();
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_wifi_start();
+        // Force scan of all channels by ensuring config is flexible?
+        // esp_wifi_connect() uses current config.
+
         esp_wifi_set_ps(WIFI_PS_NONE);
         esp_wifi_connect();
         s_retry_count = 0;
