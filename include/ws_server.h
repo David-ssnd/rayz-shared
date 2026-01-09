@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include "game_protocol.h"
 
-
 #ifdef __cplusplus
 extern "C"
 {
@@ -71,6 +70,11 @@ extern "C"
      * @return Number of connected WebSocket clients
      */
     int ws_server_client_count(void);
+
+    /**
+     * @brief Cleanup stale clients that haven't sent activity recently
+     */
+    void ws_server_cleanup_stale(void);
 
     // ============================================================================
     // MESSAGE SENDING

@@ -6,17 +6,20 @@
 #include <cJSON.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include "game_state.h"
 
 static const char* TAG = "WsServer";
 
 #define MAX_WS_CLIENTS 4
 #define WS_MAX_FRAME_SIZE 1024
+#define WS_CLIENT_TIMEOUT_MS 10000 // 10 seconds without activity = stale
 
 typedef struct
 {
     int fd;
     bool active;
+    uint32_t last_activity_ms;
 } ws_client_t;
 
 static ws_client_t s_clients[MAX_WS_CLIENTS];
@@ -49,35 +52,80 @@ static int find_client_by_fd(int fd)
     return -1;
 }
 
+static uint32_t get_time_ms(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
 static void add_client(int fd)
 {
     if (s_ws_mutex)
         xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+
+    // First, remove any existing slot with this fd (handle reconnects)
+    for (int i = 0; i < MAX_WS_CLIENTS; i++)
+    {
+        if (s_clients[i].active && s_clients[i].fd == fd)
+        {
+            ESP_LOGW(TAG, "[ADD_CLIENT] Removing old entry for fd=%d at slot %d", fd, i);
+            s_clients[i].active = false;
+            s_clients[i].fd = -1;
+            break;
+        }
+    }
+
     int slot = find_client_slot();
     if (slot >= 0)
     {
         s_clients[slot].fd = fd;
         s_clients[slot].active = true;
+        s_clients[slot].last_activity_ms = get_time_ms();
+
+        // Count active clients while holding mutex
+        int count = 0;
+        for (int i = 0; i < MAX_WS_CLIENTS; i++)
+            if (s_clients[i].active)
+                count++;
+
+        ESP_LOGI(TAG, "[ADD_CLIENT] fd=%d added to slot=%d (total=%d)", fd, slot, count);
+        if (s_ws_mutex)
+            xSemaphoreGive(s_ws_mutex);
+
         if (s_config.on_connect)
             s_config.on_connect(fd, true);
     }
-    if (s_ws_mutex)
-        xSemaphoreGive(s_ws_mutex);
+    else
+    {
+        ESP_LOGE(TAG, "[ADD_CLIENT] FAILED: No free slots! fd=%d", fd);
+        if (s_ws_mutex)
+            xSemaphoreGive(s_ws_mutex);
+    }
 }
 
-// static void remove_client(int fd)
-// {
-//     if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
-//     int slot = find_client_by_fd(fd);
-//     if (slot >= 0)
-//     {
-//         s_clients[slot].active = false;
-//         s_clients[slot].fd = -1;
-//         if (s_config.on_connect)
-//             s_config.on_connect(fd, false);
-//     }
-//     if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
-// }
+static void remove_client(int fd)
+{
+    if (s_ws_mutex)
+        xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+    int slot = find_client_by_fd(fd);
+    if (slot >= 0)
+    {
+        ESP_LOGI(TAG, "[REMOVE] Removing client fd=%d from slot %d", fd, slot);
+        s_clients[slot].active = false;
+        s_clients[slot].fd = -1;
+        if (s_ws_mutex)
+            xSemaphoreGive(s_ws_mutex);
+
+        // Call disconnect callback AFTER releasing mutex to avoid nested lock
+        if (s_config.on_connect)
+            s_config.on_connect(fd, false);
+    }
+    else
+    {
+        ESP_LOGD(TAG, "[REMOVE] Client fd=%d not found in list", fd);
+        if (s_ws_mutex)
+            xSemaphoreGive(s_ws_mutex);
+    }
+}
 
 static void handle_config_update(cJSON* root)
 {
@@ -209,18 +257,32 @@ static esp_err_t ws_handler(httpd_req_t* req)
         // Treat handshake as a connect event
         int client_fd = httpd_req_to_sockfd(req);
 
-        // Lock only when checking/modifying list
+        // Count before cleanup
+        int count_before = ws_server_client_count();
+        ESP_LOGI(TAG, "[HANDSHAKE] Incoming fd=%d, current count=%d", client_fd, count_before);
+
+        // Clean up any stale connections first
+        ws_server_cleanup_stale();
+
+        int count_after = ws_server_client_count();
+        ESP_LOGI(TAG, "[CLEANUP] After cleanup, count=%d", count_after);
+
+        // Check if fd already exists and remove it
         if (s_ws_mutex)
             xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
         int found = find_client_by_fd(client_fd);
         if (s_ws_mutex)
             xSemaphoreGive(s_ws_mutex);
 
-        if (found < 0)
+        if (found >= 0)
         {
-            add_client(client_fd);
-            ESP_LOGI(TAG, "WebSocket handshake: fd=%d connected (total=%d)", client_fd, ws_server_client_count());
+            ESP_LOGW(TAG, "[WARNING] FD %d already in list at slot %d, removing old entry", client_fd, found);
+            remove_client(client_fd);
         }
+
+        add_client(client_fd);
+        int count_final = ws_server_client_count();
+        ESP_LOGI(TAG, "[CONNECT] WebSocket handshake: fd=%d connected (total=%d)", client_fd, count_final);
         return ESP_OK;
     }
 
@@ -229,10 +291,35 @@ static esp_err_t ws_handler(httpd_req_t* req)
     ws_pkt.type = HTTPD_WS_TYPE_TEXT;
 
     esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
-    if (ret != ESP_OK || ws_pkt.len == 0 || ws_pkt.len >= WS_MAX_FRAME_SIZE)
+    if (ret != ESP_OK)
+    {
+        ESP_LOGW(TAG, "[FRAME_RECV] httpd_ws_recv_frame failed with %d for fd=%d", ret, httpd_req_to_sockfd(req));
+        remove_client(httpd_req_to_sockfd(req));
         return ret;
+    }
 
-    static char msg[WS_MAX_FRAME_SIZE];
+    if (ws_pkt.type == HTTPD_WS_TYPE_CLOSE)
+    {
+        int client_fd = httpd_req_to_sockfd(req);
+        ESP_LOGI(TAG, "[CLOSE] Received CLOSE frame from fd=%d, closing connection", client_fd);
+        remove_client(client_fd);
+
+        // Send CLOSE frame response and let httpd close the socket
+        httpd_ws_frame_t close_frame;
+        memset(&close_frame, 0, sizeof(httpd_ws_frame_t));
+        close_frame.type = HTTPD_WS_TYPE_CLOSE;
+        close_frame.payload = NULL;
+        close_frame.len = 0;
+        httpd_ws_send_frame(req, &close_frame);
+
+        // Return error to force httpd to close the connection
+        return ESP_FAIL;
+    }
+
+    if (ws_pkt.len == 0 || ws_pkt.len >= WS_MAX_FRAME_SIZE)
+        return ESP_OK;
+
+    char msg[WS_MAX_FRAME_SIZE];
     ws_pkt.payload = (uint8_t*)msg;
     ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
     if (ret != ESP_OK)
@@ -251,6 +338,15 @@ static esp_err_t ws_handler(httpd_req_t* req)
     if (found < 0)
         add_client(client_fd);
 
+    // Update activity timestamp
+    if (s_ws_mutex)
+        xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+    int slot = find_client_by_fd(client_fd);
+    if (slot >= 0)
+        s_clients[slot].last_activity_ms = get_time_ms();
+    if (s_ws_mutex)
+        xSemaphoreGive(s_ws_mutex);
+
     process_message(client_fd, msg);
 
     if (s_config.on_message)
@@ -267,6 +363,7 @@ void ws_server_init(const WsServerConfig* config)
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
     {
         s_clients[i].fd = -1;
+        s_clients[i].active = false;
     }
 
     if (!s_ws_mutex)
@@ -275,6 +372,7 @@ void ws_server_init(const WsServerConfig* config)
     }
 
     s_initialized = true;
+    ESP_LOGI(TAG, "[INIT] WebSocket server initialized");
 }
 
 void ws_server_register(httpd_handle_t server)
@@ -294,6 +392,41 @@ void ws_server_register(httpd_handle_t server)
     };
 
     httpd_register_uri_handler(server, &ws_uri);
+}
+
+// Cleanup stale clients that haven't sent anything in WS_CLIENT_TIMEOUT_MS
+void ws_server_cleanup_stale(void)
+{
+    uint32_t now = get_time_ms();
+    if (s_ws_mutex)
+        xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+
+    int removed_count = 0;
+    for (int i = 0; i < MAX_WS_CLIENTS; i++)
+    {
+        if (s_clients[i].active)
+        {
+            uint32_t age = now - s_clients[i].last_activity_ms;
+            if (age > WS_CLIENT_TIMEOUT_MS)
+            {
+                int old_fd = s_clients[i].fd;
+                ESP_LOGW(TAG, "[STALE] Removing client at slot %d, fd=%d (age=%lu ms)", i, old_fd, (unsigned long)age);
+                s_clients[i].active = false;
+                s_clients[i].fd = -1;
+                // Proactively close the HTTPD session to free resources
+                if (s_server)
+                {
+                    httpd_sess_trigger_close(s_server, old_fd);
+                }
+                removed_count++;
+            }
+        }
+    }
+    if (removed_count > 0)
+        ESP_LOGI(TAG, "[CLEANUP] Removed %d stale clients", removed_count);
+
+    if (s_ws_mutex)
+        xSemaphoreGive(s_ws_mutex);
 }
 
 bool ws_server_is_connected(void)
@@ -372,13 +505,22 @@ bool ws_server_send(int client_fd, const char* message)
 
 void ws_server_broadcast(const char* message)
 {
+    int fds[MAX_WS_CLIENTS];
+    int n = 0;
     if (s_ws_mutex)
         xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
+    {
         if (s_clients[i].active)
-            ws_server_send(s_clients[i].fd, message);
+        {
+            fds[n++] = s_clients[i].fd;
+        }
+    }
     if (s_ws_mutex)
         xSemaphoreGive(s_ws_mutex);
+
+    for (int i = 0; i < n; i++)
+        ws_server_send(fds[i], message);
 }
 
 static cJSON* create_status_json()
