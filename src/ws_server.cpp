@@ -394,10 +394,9 @@ void ws_server_register(httpd_handle_t server)
     httpd_register_uri_handler(server, &ws_uri);
 }
 
-// Cleanup stale clients that haven't sent anything in WS_CLIENT_TIMEOUT_MS
+// Cleanup dead sockets (called on new handshake to free slots)
 void ws_server_cleanup_stale(void)
 {
-    uint32_t now = get_time_ms();
     if (s_ws_mutex)
         xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
 
@@ -406,24 +405,26 @@ void ws_server_cleanup_stale(void)
     {
         if (s_clients[i].active)
         {
-            uint32_t age = now - s_clients[i].last_activity_ms;
-            if (age > WS_CLIENT_TIMEOUT_MS)
+            int fd = s_clients[i].fd;
+            // Check if the socket is still valid by attempting to get socket error
+            int opt_val = 0;
+            socklen_t opt_len = sizeof(opt_val);
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &opt_val, &opt_len) != 0 || opt_val != 0)
             {
-                int old_fd = s_clients[i].fd;
-                ESP_LOGW(TAG, "[STALE] Removing client at slot %d, fd=%d (age=%lu ms)", i, old_fd, (unsigned long)age);
+                ESP_LOGW(TAG, "[DEAD_SOCKET] Removing dead socket at slot %d, fd=%d", i, fd);
                 s_clients[i].active = false;
                 s_clients[i].fd = -1;
                 // Proactively close the HTTPD session to free resources
                 if (s_server)
                 {
-                    httpd_sess_trigger_close(s_server, old_fd);
+                    httpd_sess_trigger_close(s_server, fd);
                 }
                 removed_count++;
             }
         }
     }
     if (removed_count > 0)
-        ESP_LOGI(TAG, "[CLEANUP] Removed %d stale clients", removed_count);
+        ESP_LOGI(TAG, "[CLEANUP] Removed %d dead sockets", removed_count);
 
     if (s_ws_mutex)
         xSemaphoreGive(s_ws_mutex);
