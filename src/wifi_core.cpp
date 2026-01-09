@@ -264,7 +264,7 @@ void wifi_start_ap()
     country.schan = 1;
     country.nchan = 13;
     country.policy = WIFI_COUNTRY_POLICY_MANUAL;
-    
+
     esp_wifi_set_country(&country);
     esp_wifi_set_max_tx_power(78); // ~19.5 dBm
     esp_wifi_set_ps(WIFI_PS_NONE);

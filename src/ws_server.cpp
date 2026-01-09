@@ -1,12 +1,12 @@
 #include "ws_server.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <cJSON.h>
 #include <stdlib.h>
 #include <string.h>
 #include "game_state.h"
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
 
 static const char* TAG = "WsServer";
 
@@ -51,7 +51,8 @@ static int find_client_by_fd(int fd)
 
 static void add_client(int fd)
 {
-    if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+    if (s_ws_mutex)
+        xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     int slot = find_client_slot();
     if (slot >= 0)
     {
@@ -60,7 +61,8 @@ static void add_client(int fd)
         if (s_config.on_connect)
             s_config.on_connect(fd, true);
     }
-    if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
+    if (s_ws_mutex)
+        xSemaphoreGive(s_ws_mutex);
 }
 
 // static void remove_client(int fd)
@@ -206,11 +208,13 @@ static esp_err_t ws_handler(httpd_req_t* req)
     {
         // Treat handshake as a connect event
         int client_fd = httpd_req_to_sockfd(req);
-        
+
         // Lock only when checking/modifying list
-        if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+        if (s_ws_mutex)
+            xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
         int found = find_client_by_fd(client_fd);
-        if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
+        if (s_ws_mutex)
+            xSemaphoreGive(s_ws_mutex);
 
         if (found < 0)
         {
@@ -236,12 +240,14 @@ static esp_err_t ws_handler(httpd_req_t* req)
     msg[ws_pkt.len] = '\0';
 
     int client_fd = httpd_req_to_sockfd(req);
-    
+
     // Ensure client is tracked
-    if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+    if (s_ws_mutex)
+        xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     int found = find_client_by_fd(client_fd);
-    if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
-    
+    if (s_ws_mutex)
+        xSemaphoreGive(s_ws_mutex);
+
     if (found < 0)
         add_client(client_fd);
 
@@ -262,11 +268,12 @@ void ws_server_init(const WsServerConfig* config)
     {
         s_clients[i].fd = -1;
     }
-    
-    if (!s_ws_mutex) {
+
+    if (!s_ws_mutex)
+    {
         s_ws_mutex = xSemaphoreCreateMutex();
     }
-    
+
     s_initialized = true;
 }
 
@@ -292,24 +299,29 @@ void ws_server_register(httpd_handle_t server)
 bool ws_server_is_connected(void)
 {
     bool connected = false;
-    if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+    if (s_ws_mutex)
+        xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
-        if (s_clients[i].active) {
+        if (s_clients[i].active)
+        {
             connected = true;
             break;
         }
-    if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
+    if (s_ws_mutex)
+        xSemaphoreGive(s_ws_mutex);
     return connected;
 }
 
 int ws_server_client_count(void)
 {
     int c = 0;
-    if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+    if (s_ws_mutex)
+        xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
         if (s_clients[i].active)
             c++;
-    if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
+    if (s_ws_mutex)
+        xSemaphoreGive(s_ws_mutex);
     return c;
 }
 
@@ -360,11 +372,13 @@ bool ws_server_send(int client_fd, const char* message)
 
 void ws_server_broadcast(const char* message)
 {
-    if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+    if (s_ws_mutex)
+        xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
         if (s_clients[i].active)
             ws_server_send(s_clients[i].fd, message);
-    if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
+    if (s_ws_mutex)
+        xSemaphoreGive(s_ws_mutex);
 }
 
 static cJSON* create_status_json()
