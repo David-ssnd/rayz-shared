@@ -119,3 +119,56 @@ void wifi_manager_init(const char* device_name, const char* role)
 
     wifi_evaluate_boot_mode();
 }
+
+// New Accessors for Display
+wifi_boot_mode_t wifi_manager_get_boot_mode()
+{
+    return g_wifi_boot_mode;
+}
+
+const char* wifi_manager_get_ssid()
+{
+    static char ssid_buf[33];
+    memset(ssid_buf, 0, sizeof(ssid_buf));
+
+    if (g_wifi_boot_mode == WIFI_BOOT_PROVISIONING)
+    {
+        wifi_config_t conf;
+        if (esp_wifi_get_config(WIFI_IF_AP, &conf) == ESP_OK)
+        {
+             strncpy(ssid_buf, (char*)conf.ap.ssid, 32);
+             return ssid_buf;
+        }
+        return "AP Mode";
+    }
+    else
+    {
+         wifi_config_t conf;
+         if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK)
+         {
+             strncpy(ssid_buf, (char*)conf.sta.ssid, 32);
+             return ssid_buf;
+         }
+         return "?";
+    }
+}
+
+const char* wifi_manager_get_status_string()
+{
+    if (g_wifi_boot_mode == WIFI_BOOT_PROVISIONING)
+    {
+        return "AP Active";
+    }
+
+    if (wifi_manager_is_connected())
+    {
+        return "Online";
+    }
+
+    return "Connecting...";
+}
+
+const char* wifi_manager_get_device_name()
+{
+    return g_device_name;
+}
