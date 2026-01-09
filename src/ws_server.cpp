@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "game_state.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 static const char* TAG = "WsServer";
 
@@ -19,12 +21,11 @@ typedef struct
 
 static ws_client_t s_clients[MAX_WS_CLIENTS];
 static httpd_handle_t s_server = NULL;
-static WsServerConfig s_config = {0};
+static WsServerConfig s_config = {};
 static bool s_initialized = false;
+static SemaphoreHandle_t s_ws_mutex = NULL;
 
-static char s_send_buffer[WS_MAX_FRAME_SIZE];
-
-// Forward declaration so we can log client count during handshake
+// Forward declaration
 int ws_server_client_count(void);
 void ws_server_send_status_to(int fd);
 
@@ -50,6 +51,7 @@ static int find_client_by_fd(int fd)
 
 static void add_client(int fd)
 {
+    if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     int slot = find_client_slot();
     if (slot >= 0)
     {
@@ -58,19 +60,22 @@ static void add_client(int fd)
         if (s_config.on_connect)
             s_config.on_connect(fd, true);
     }
+    if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
 }
 
-static void remove_client(int fd)
-{
-    int slot = find_client_by_fd(fd);
-    if (slot >= 0)
-    {
-        s_clients[slot].active = false;
-        s_clients[slot].fd = -1;
-        if (s_config.on_connect)
-            s_config.on_connect(fd, false);
-    }
-}
+// static void remove_client(int fd)
+// {
+//     if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+//     int slot = find_client_by_fd(fd);
+//     if (slot >= 0)
+//     {
+//         s_clients[slot].active = false;
+//         s_clients[slot].fd = -1;
+//         if (s_config.on_connect)
+//             s_config.on_connect(fd, false);
+//     }
+//     if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
+// }
 
 static void handle_config_update(cJSON* root)
 {
@@ -201,7 +206,13 @@ static esp_err_t ws_handler(httpd_req_t* req)
     {
         // Treat handshake as a connect event
         int client_fd = httpd_req_to_sockfd(req);
-        if (find_client_by_fd(client_fd) < 0)
+        
+        // Lock only when checking/modifying list
+        if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+        int found = find_client_by_fd(client_fd);
+        if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
+
+        if (found < 0)
         {
             add_client(client_fd);
             ESP_LOGI(TAG, "WebSocket handshake: fd=%d connected (total=%d)", client_fd, ws_server_client_count());
@@ -225,7 +236,13 @@ static esp_err_t ws_handler(httpd_req_t* req)
     msg[ws_pkt.len] = '\0';
 
     int client_fd = httpd_req_to_sockfd(req);
-    if (find_client_by_fd(client_fd) < 0)
+    
+    // Ensure client is tracked
+    if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+    int found = find_client_by_fd(client_fd);
+    if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
+    
+    if (found < 0)
         add_client(client_fd);
 
     process_message(client_fd, msg);
@@ -245,6 +262,11 @@ void ws_server_init(const WsServerConfig* config)
     {
         s_clients[i].fd = -1;
     }
+    
+    if (!s_ws_mutex) {
+        s_ws_mutex = xSemaphoreCreateMutex();
+    }
+    
     s_initialized = true;
 }
 
@@ -269,18 +291,25 @@ void ws_server_register(httpd_handle_t server)
 
 bool ws_server_is_connected(void)
 {
+    bool connected = false;
+    if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
-        if (s_clients[i].active)
-            return true;
-    return false;
+        if (s_clients[i].active) {
+            connected = true;
+            break;
+        }
+    if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
+    return connected;
 }
 
 int ws_server_client_count(void)
 {
     int c = 0;
+    if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
         if (s_clients[i].active)
             c++;
+    if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
     return c;
 }
 
@@ -331,9 +360,11 @@ bool ws_server_send(int client_fd, const char* message)
 
 void ws_server_broadcast(const char* message)
 {
+    if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
         if (s_clients[i].active)
             ws_server_send(s_clients[i].fd, message);
+    if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
 }
 
 static cJSON* create_status_json()
@@ -397,7 +428,6 @@ void ws_server_send_status(void)
 
 void ws_server_send_heartbeat_ack(int client_fd)
 {
-    const GameStateData* st = game_state_get();
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "op", OP_HEARTBEAT_ACK);
     cJSON_AddStringToObject(root, "type", "heartbeat_ack");
@@ -424,7 +454,6 @@ void ws_server_broadcast_hit(const char* shooter_id_str)
 
 void ws_server_broadcast_shot(void)
 {
-    const DeviceConfig* cfg = game_state_get_config();
     const GameStateData* st = game_state_get();
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "op", OP_SHOT_FIRED);
@@ -445,21 +474,12 @@ void ws_server_broadcast_game_state(void)
 
 void ws_server_broadcast_respawn(void)
 {
-    const DeviceConfig* cfg = game_state_get_config();
     const GameStateData* st = game_state_get();
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "op", OP_RESPAWN);
     cJSON_AddStringToObject(root, "type", "respawn");
     cJSON_AddNumberToObject(root, "timestamp_ms", esp_timer_get_time() / 1000);
     cJSON_AddNumberToObject(root, "current_hearts", st->hearts_remaining);
-    // Extra: device_id? Protocol has DeviceStatusMessage in STATUS, checks individual respawn message:
-    // User Request: RespawnMessage: op, type, timestamp_ms, current_hearts
-    // It does not list device_id in RespawnMessage in the "User Request" (check TypeScript definition).
-    // existing has device_id. I'll remove it if not in spec, or keep it if helpful?
-    // User Spec:
-    // export interface RespawnMessage { ... current_hearts?: number }
-    // No device_id.
-    // I will stick to Spec.
 
     char* str = cJSON_PrintUnformatted(root);
     ws_server_broadcast(str);

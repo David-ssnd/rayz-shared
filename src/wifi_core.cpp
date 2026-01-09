@@ -45,7 +45,7 @@ static uint8_t pick_least_crowded_channel(void)
     const uint8_t candidates[3] = {1, 6, 11};
     int score[3] = {0, 0, 0};
 
-    wifi_scan_config_t scan_cfg = {0};
+    wifi_scan_config_t scan_cfg = {};
     scan_cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
     scan_cfg.scan_time.active.min = 50;
     scan_cfg.scan_time.active.max = 120;
@@ -60,7 +60,7 @@ static uint8_t pick_least_crowded_channel(void)
         return 1;
 
     uint16_t max_records = ap_count > 32 ? 32 : ap_count;
-    wifi_ap_record_t records[32] = {0};
+    wifi_ap_record_t records[32] = {};
 
     err = esp_wifi_scan_get_ap_records(&max_records, records);
     if (err != ESP_OK)
@@ -259,7 +259,12 @@ void wifi_start_ap()
         return;
     }
 
-    wifi_country_t country = {.cc = WIFI_COUNTRY_CODE, .schan = 1, .nchan = 13, .policy = WIFI_COUNTRY_POLICY_MANUAL};
+    wifi_country_t country = {};
+    memcpy(country.cc, WIFI_COUNTRY_CODE, sizeof(country.cc));
+    country.schan = 1;
+    country.nchan = 13;
+    country.policy = WIFI_COUNTRY_POLICY_MANUAL;
+    
     esp_wifi_set_country(&country);
     esp_wifi_set_max_tx_power(78); // ~19.5 dBm
     esp_wifi_set_ps(WIFI_PS_NONE);

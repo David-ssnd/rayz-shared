@@ -16,7 +16,6 @@ idf_component_register(
         "include"
     REQUIRES
         nvs_flash
-        bt
         esp_wifi
         esp_coex
         esp_netif
