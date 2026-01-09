@@ -4,10 +4,11 @@
 #include <esp_event.h>
 #include <esp_log.h>
 #include <esp_netif.h>
-#include <esp_wifi.h>
 #include <esp_timer.h>
+#include <esp_wifi.h>
 #include <nvs_flash.h>
 #include <string.h>
+
 
 #include "nvs_store.h"
 #include "wifi_internal.h"
@@ -136,20 +137,20 @@ const char* wifi_manager_get_ssid()
         wifi_config_t conf;
         if (esp_wifi_get_config(WIFI_IF_AP, &conf) == ESP_OK)
         {
-             strncpy(ssid_buf, (char*)conf.ap.ssid, 32);
-             return ssid_buf;
+            strncpy(ssid_buf, (char*)conf.ap.ssid, 32);
+            return ssid_buf;
         }
         return "AP Mode";
     }
     else
     {
-         wifi_config_t conf;
-         if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK)
-         {
-             strncpy(ssid_buf, (char*)conf.sta.ssid, 32);
-             return ssid_buf;
-         }
-         return "?";
+        wifi_config_t conf;
+        if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK)
+        {
+            strncpy(ssid_buf, (char*)conf.sta.ssid, 32);
+            return ssid_buf;
+        }
+        return "?";
     }
 }
 
