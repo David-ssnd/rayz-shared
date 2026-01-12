@@ -2,8 +2,8 @@
 #include <esp_coexist.h>
 #include <esp_log.h>
 #include <esp_wifi.h>
-#include <string.h>
 #include <ctype.h>
+#include <string.h>
 #include "hash.h"
 
 static const uint8_t ESPNOW_PMK[ESP_NOW_KEY_LEN] = {'r', 'a', 'y', 'z', '-', 'e', 's', 'p',
@@ -19,8 +19,8 @@ static uint8_t s_peer_count = 0;
 
 static void log_mac(const uint8_t mac[ESP_NOW_ETH_ALEN], const char* prefix)
 {
-    ESP_LOGI(TAG, "%s %02X:%02X:%02X:%02X:%02X:%02X", prefix ? prefix : "MAC", mac[0], mac[1], mac[2], mac[3],
-             mac[4], mac[5]);
+    ESP_LOGI(TAG, "%s %02X:%02X:%02X:%02X:%02X:%02X", prefix ? prefix : "MAC", mac[0], mac[1], mac[2], mac[3], mac[4],
+             mac[5]);
 }
 
 uint8_t espnow_comm_hash_id(const char* id)

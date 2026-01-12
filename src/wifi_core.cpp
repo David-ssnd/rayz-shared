@@ -287,7 +287,8 @@ void wifi_start_ap()
     esp_wifi_set_ps(WIFI_PS_NONE);
     esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
 
-    uint8_t ch = pick_least_crowded_channel();
+    // Scanning requires station mode and started driver. Since we are in AP setup, just default to 1.
+    uint8_t ch = 1;
 
     wifi_config_t ap_config = {};
     strcpy((char*)ap_config.ap.ssid, "RayZ-Setup");

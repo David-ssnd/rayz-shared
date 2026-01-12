@@ -144,6 +144,7 @@ void wifi_start_http_server(bool provisioning_mode)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
+    config.stack_size = 8192;
     esp_err_t ret = httpd_start(&g_httpd, &config);
     if (ret == ESP_OK)
     {
