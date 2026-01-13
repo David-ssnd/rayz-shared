@@ -371,6 +371,7 @@ void wifi_start_sta(const char* ssid, const char* pass)
     sta_config.sta.listen_interval = 3;
     sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
 
+    /*
     wifi_ap_record_t best = {};
     if (find_best_ap(ssid, &best))
     {
@@ -384,6 +385,8 @@ void wifi_start_sta(const char* ssid, const char* pass)
     {
         ESP_LOGW(TAG, "AP '%s' not seen in scan; connecting blind", ssid);
     }
+    */
+    
     ret = esp_wifi_set_config(WIFI_IF_STA, &sta_config);
     if (ret != ESP_OK)
     {
