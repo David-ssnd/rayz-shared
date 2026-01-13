@@ -9,6 +9,7 @@
 #include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_wifi.h>
+#include <esp_mac.h>
 #include <string.h>
 #include <string>
 
@@ -181,8 +182,12 @@ void wifi_start_ap()
     uint8_t ch = 1;
 
     wifi_config_t ap_config = {};
-    strcpy((char*)ap_config.ap.ssid, "RayZ-Setup");
-    ap_config.ap.ssid_len = strlen("RayZ-Setup");
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char ssid_buf[32];
+    snprintf(ssid_buf, sizeof(ssid_buf), "RayZ-%02X%02X%02X", mac[3], mac[4], mac[5]);
+    strcpy((char*)ap_config.ap.ssid, ssid_buf);
+    ap_config.ap.ssid_len = strlen(ssid_buf);
     ap_config.ap.channel = ch;
     ap_config.ap.authmode = WIFI_AUTH_OPEN;
     ap_config.ap.max_connection = 4;
@@ -200,7 +205,7 @@ void wifi_start_ap()
         return;
     }
 
-    ESP_LOGI(TAG, "AP mode started, SSID=RayZ-Setup");
+    ESP_LOGI(TAG, "AP mode started, SSID=%s", ssid_buf);
     g_wifi_channel = ap_config.ap.channel;
     esp_wifi_set_ps(WIFI_PS_NONE);
 
