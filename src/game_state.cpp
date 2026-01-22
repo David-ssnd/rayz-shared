@@ -96,6 +96,15 @@ bool game_state_load_ids(void)
     {
         s_config.color_rgb = color;
     }
+    
+    // Load device name
+    char name_buf[32] = {0};
+    if (nvs_store_read_str(NVS_GAME_NS, "device_name", name_buf, sizeof(name_buf)))
+    {
+        strncpy(s_config.device_name, name_buf, sizeof(s_config.device_name) - 1);
+        s_config.device_name[sizeof(s_config.device_name) - 1] = '\0';
+    }
+    
     UNLOCK();
     return loaded;
 }
@@ -108,6 +117,13 @@ bool game_state_save_ids(void)
     ok &= nvs_store_write_u8(NVS_GAME_NS, NVS_KEY_PLAYER_ID, s_config.player_id);
     ok &= nvs_store_write_u8(NVS_GAME_NS, NVS_KEY_TEAM_ID, s_config.team_id);
     ok &= nvs_store_write_u32(NVS_GAME_NS, NVS_KEY_COLOR, s_config.color_rgb);
+    
+    // Save device name
+    if (strlen(s_config.device_name) > 0)
+    {
+        ok &= nvs_store_write_str(NVS_GAME_NS, "device_name", s_config.device_name);
+    }
+    
     UNLOCK();
     return ok;
 }

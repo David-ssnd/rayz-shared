@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include "game_state.h"
+#include "espnow_comm.h"
 
 static const char* TAG = "WsServer";
 
@@ -136,7 +137,18 @@ static void handle_config_update(cJSON* root)
     }
 
     DeviceConfig* dev = game_state_get_config_mut();
-    cJSON* item = cJSON_GetObjectItem(root, "device_id");
+    cJSON* item;
+    
+    // Device Name
+    item = cJSON_GetObjectItem(root, "device_name");
+    if (item && cJSON_IsString(item))
+    {
+        strncpy(dev->device_name, item->valuestring, sizeof(dev->device_name) - 1);
+        dev->device_name[sizeof(dev->device_name) - 1] = '\0';
+    }
+    
+    // Identity
+    item = cJSON_GetObjectItem(root, "device_id");
     if (item)
         dev->device_id = item->valueint;
     item = cJSON_GetObjectItem(root, "player_id");
@@ -150,27 +162,55 @@ static void handle_config_update(cJSON* root)
         dev->color_rgb = item->valueint;
 
     GameConfig* game = game_state_get_game_config_mut();
+    
+    // Health Settings
     item = cJSON_GetObjectItem(root, "max_hearts");
     if (item)
         game->max_hearts = item->valueint;
+    item = cJSON_GetObjectItem(root, "spawn_hearts");
+    if (item)
+        game->max_hearts = item->valueint; // Use as starting hearts
+    item = cJSON_GetObjectItem(root, "respawn_time_s");
+    if (item)
+        game->respawn_cooldown_ms = item->valueint * 1000;
+    item = cJSON_GetObjectItem(root, "enable_hearts");
+    if (item)
+        game->unlimited_respawn = !cJSON_IsTrue(item);
+    item = cJSON_GetObjectItem(root, "friendly_fire");
+    if (item)
+        game->friendly_fire_enabled = cJSON_IsTrue(item);
+        
+    // Ammo Settings
     item = cJSON_GetObjectItem(root, "max_ammo");
     if (item)
         game->max_ammo = item->valueint;
     item = cJSON_GetObjectItem(root, "reload_time_ms");
     if (item)
         game->reload_time_ms = item->valueint;
-    item = cJSON_GetObjectItem(root, "game_duration_s");
-    if (item)
-        game->time_limit_s = item->valueint;
     item = cJSON_GetObjectItem(root, "enable_ammo");
     if (item)
         game->unlimited_ammo = !cJSON_IsTrue(item);
-    item = cJSON_GetObjectItem(root, "friendly_fire");
+        
+    // Game Duration
+    item = cJSON_GetObjectItem(root, "game_duration_s");
     if (item)
-        game->friendly_fire_enabled = cJSON_IsTrue(item);
-    item = cJSON_GetObjectItem(root, "respawn_time_s");
-    if (item)
-        game->respawn_cooldown_ms = item->valueint * 1000;
+        game->time_limit_s = item->valueint;
+        
+    // ESP-NOW Peers (CSV format: "aa:bb:cc:dd:ee:ff,11:22:33:44:55:66")
+    item = cJSON_GetObjectItem(root, "espnow_peers");
+    if (item && cJSON_IsString(item) && strlen(item->valuestring) > 0)
+    {
+        ESP_LOGI("WS", "Loading ESP-NOW peers: %s", item->valuestring);
+        esp_err_t err = espnow_comm_load_peers_from_csv(item->valuestring);
+        if (err == ESP_OK)
+        {
+            ESP_LOGI("WS", "ESP-NOW peers loaded, count: %d", espnow_comm_peer_count());
+        }
+        else
+        {
+            ESP_LOGE("WS", "Failed to load ESP-NOW peers: %d", err);
+        }
+    }
 
     // Save device ID changes
     game_state_save_ids();

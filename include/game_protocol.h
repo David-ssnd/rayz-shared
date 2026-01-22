@@ -54,6 +54,7 @@ extern "C"
         uint8_t team_id;    // 0 = no team
         uint32_t color_rgb; // 0xRRGGBB
         DeviceRole role;
+        char device_name[32]; // Device display name (e.g., "Player 1 - Target")
     } DeviceConfig;
 
     typedef struct
